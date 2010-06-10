@@ -1,13 +1,14 @@
 var Connection = require('connection').Connection;
 var KeyMapper = require('keymap').KeyMapper;
+var Display = require('display');
 
-var VM_Manager = (function () {
+var Manager = (function () {
     var vms = {};
-    var active_vm = null;
+    var activeVm = null;
 
     return {
         add: function (vm) {
-             vms[vm.vm_id] = vm;
+             vms[vm.vmId] = vm;
         },
         get: function (id) {
              return vms[id];
@@ -15,133 +16,88 @@ var VM_Manager = (function () {
         del: function (id) {
              delete vms[id];
         },
-        get_active_vm: function () {
-             return active_vm;
+        getActiveVm: function () {
+             return activeVm;
         },
-        set_active_vm: function (vm) {
-             active_vm = vm;
+        setActiveVm: function (vm) {
+             activeVm = vm;
         },
     }
 })();
-exports.VM_Manager = VM_Manager;
 
-function VM_Event_Handler (vm) {
+exports.Manager = Manager;
+
+function VmEventHandler (vm) {
     this.vm = vm;
 
     this.error = function (msg) {
-        $('.center_message', vm.win)
-            . show()
-            . text(msg.message)
-            . css({ color: 'red' });
+        vm.display.consoleMessage(msg.message);
     }
 
     this.attached = function (msg) {
-        $('.center_message', vm.win).hide();
-        vm.event_emitter.redraw_screen();
+        vm.display.consoleMessage(null);
     }
 
     this.detached = function (msg) {
-        $('.center_message', vm.win)
-            . show()
-            . text('vm has been detached')
-            . css({ color: 'red' });
+        vm.dipslay.consoleMessage('vm has been detached');
     }
 
-    this.redraw_screen = function (msg) {
-        var img = png_img(msg.png64);
-        var x = 0, y = 0;
-        var width = parseInt(msg.width, 10);
-        var height = parseInt(msg.height, 10);
-
-        update_screen(img, 0, 0, width, height);
-        cleanup_images(img);
+    this.updateScreen = function (msg) {
+        vm.display.conDraw(msg.image64, msg.imageType, msg.x, msg.y,
+            msg.width, msg.height, msg.fullScreen);
     }
 
-    this.update_screen = function (msg) {
-        var img = png_img(msg.png64);
-        var x = parseInt(msg.x, 10);
-        var y = parseInt(msg.y, 10);
-        var width = parseInt(msg.width, 10);
-        var height = parseInt(msg.height, 10);
-
-        if (height > vm.win.height() + 22) {
-             vm.win.height(height+22); // 22 to account for window's .title.
-        }
-        if (width > vm.win.width()) {
-             vm.win.width(width);
-        }
-        img.css({
-             position : 'absolute',
-             left : x,
-             top : y,
-             width : width,
-             height : height
-        });
-        $('.console', vm.win).append(img);
+    this.desktopSize = function (msg) {
+        vm.display.resize(msg.width, msg.height);
     }
 
-    this.desktop_size = function (msg) {
-        vm.win.height(msg.height + 22);
-        vm.win.width(msg.width);
-    }
-
-    this.copy_rect = function (msg) {
-        alert('yeah');
-    }
-
-    function png_img (png) {
-        // TODO: use MHTML for IE
-        return $('<img>').attr('src', 'data:image/png;base64,' + png);
-    }
-
-    function cleanup_images (except) {
-        $('.console img', vm.win)
-            . not(except)
-            . remove();
+    this.copyRect = function (msg) {
+        vm.display.copyRect(msg.srcX, msg.srcY, msg.dstX, msg.dstY,
+            msg.width, msg.height);
     }
 }
 
-function VM_Event_Emitter (vm) {
-    this.attach_vm = function () {
-        Connection.send_msg({
-             vm_id: vm.vm_id,
+function VmEventEmitter (vm) {
+    this.attachVm = function () {
+        Connection.sendMsg({
+             vmId: vm.vmId,
              action: 'attach'
         });
     }
 
-    this.detach_vm = function () {
-        Connection.send_msg({
-            vm_id: vm.vm_id,
+    this.detachVm = function () {
+        Connection.sendMsg({
+            vmId: vm.vmId,
             action: 'detach'
         });
     }
 
-    this.redraw_screen = function () {
-        Connection.send_msg({
-             vm_id: vm.vm_id,
-             action: 'redraw_screen'
+    this.redrawScreen = function () {
+        Connection.sendMsg({
+             vmId: vm.vmId,
+             action: 'redrawScreen'
         });
     }
 
-    this.send_key_down = function (key_code) {
-        Connection.send_msg({
-             vm_id:  vm.vm_id,
-             action: 'key_down',
-             key: String(KeyMapper.get_key_sym(key_code))
+    this.sendKeyDown = function (keyCode) {
+        Connection.sendMsg({
+             vmId:  vm.vmId,
+             action: 'keyDown',
+             key: String(KeyMapper.getKeySym(keyCode))
         });
     }
 
-    this.send_key_up = function (key_code) {
-        Connection.send_msg({
-             vm_id:  vm.vm_id,
-             action: 'key_up',
-             key: String(KeyMapper.get_key_sym(key_code))
+    this.sendKeyUp = function (keyCode) {
+        Connection.sendMsg({
+             vmId:  vm.vmId,
+             action: 'keyUp',
+             key: String(KeyMapper.getKeySym(keyCode))
         });
     }
 
-    this.send_pointer = function (x, y, mask) {
-        Connection.send_msg({
-             vm_id : vm.vm_id,
+    this.sendPointer = function (x, y, mask) {
+        Connection.sendMsg({
+             vmId : vm.vmId,
              action : 'pointer',
              x : String(x),
              y : String(y),
@@ -150,119 +106,35 @@ function VM_Event_Emitter (vm) {
     }
 }
 
-function VM (vm_id) {
+function VM (vmId) {
     var vm = this;
 
-    this.vm_id  = vm_id;
-    this.win = null;
-    this.title = null;
-    this.event_emitter = new VM_Event_Emitter(this);
+    this.vmId = vmId;
+    this.eventEmitter = new VmEventEmitter(this);
+    //this.display = new Display.StackedDisplay(vm, {width: 400, height: 200});
+    this.display = new Display.CanvasDisplay(vm, {width: 400, height: 200});
 
-    function create_window () {
-        var win = $('<div>')
-             . addClass('window')
-             . attr('tabindex', 0)
-             . data('vm_id', vm_id)
-             . draggable();
-
-        var title = $('<div>').addClass('title');
-        title.append($('<div>').addClass('text').text(vm_id));
-        title.append(
-            $('<div>').addClass('buttons').append(
-                $('<span>').addClass('refresh').append(
-                    $('<img>').attr('src', '/img/refresh.png').click(
-                        function (ev) {
-                            vm.event_emitter.redraw_screen();
-                        }
-                    )
-                )
-            ).append(
-                $('<span>').addClass('close').append(
-                    $('<img>').attr('src', '/img/close.png').click(
-                        function (ev) {
-                            vm.event_emitter.detach_vm();
-                            VM_Manager.del(vm_id);
-                            win.remove();
-                        }
-                    )
-                )
-            )
-        ).append(
-            $('<div>').addClass('clear')
-        );
-        win.append(title);
-
-        var con = $('<div>').addClass('console');
-        con.append(
-             $('<div>')
-                . addClass('center_message')
-                . text('Loading ' + vm_id + '...')
-        );
-        win.append(con);
-        
-        win.mouseover(function(ev) {
-             focus(win);
-        });
-        
-        win.mouseout(function(ev) {
-             unfocus(win);
-        });
-        
-        var mouse_mask = 0;
-        
-        con.mousemove(function(ev) {
-             var x = ev.pageX - con.offset().left;
-             var y = ev.pageY - con.offset().top;
-             vm.event_emitter.send_pointer(x, y, mouse_mask);
-        });
-        
-        con.mousedown(function(ev) {
-             mouse_mask = 1;
-             vm.event_emitter.send_pointer(ev.pageX, ev.pageY, mouse_mask);
-        });
-        
-        con.mouseup(function(ev) {
-             mouse_mask = 0;
-             vm.event_emitter.send_pointer(ev.pageX, ev.pageY, mouse_mask);
-        });
-        
-        win.keydown(function(ev) {
-             vm.event_emitter.send_key_down(ev.keyCode);
-        });
-        
-        win.keyup(function(ev) {
-             vm.event_emitter.send_key_up(ev.keyCode);
-        });
-
+    function createWindow () {
+        var win = vm.display.createWindow();
         $('#content').append(win);
-        return win;
-    }
-
-    function focus (win) {
-        VM_Manager.set_active_vm(win);
-        win.focus();
-        $('.title', win).addClass("active-title");
-    }
-
-    function unfocus (win) {
-        VM_Manager.set_active_vm(null);
-        $('.focusremover').focus();
-        $('.title', win).removeClass("active-title");
     }
 
     this.focus = function () {
-        focus(this.win);
+        Manager.setActiveVm(vm);
+        vm.display.focus();
     }
 
     this.unfocus = function () {
-        unfocus(this.win);
+        Manager.setActiveVm(null);
+        vm.display.unfocus();
     }
 
     this.run = function () {
-        this.win = create_window();
-        Connection.add_event_handler(new VM_Event_Handler(this));
-        vm.event_emitter.attach_vm();
+        createWindow();
+        Connection.addEventHandler(new VmEventHandler(this));
+        vm.eventEmitter.attachVm();
     }
 }
+
 exports.VM = VM;
 
