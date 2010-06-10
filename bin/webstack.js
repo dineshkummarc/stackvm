@@ -37,7 +37,6 @@ socketio.listen(webserver, {
     
     onClientMessage : function(msg, client) {
         var vm = vms[msg.vm_id];
-        sys.log('action: ' + msg.action);
         var f = {
             list : function () {
                 var acc = [];
